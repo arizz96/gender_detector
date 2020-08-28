@@ -73,13 +73,31 @@ class GenderDetector
     if !name_exists?(name)
       @unknown_value
     elsif country.nil?
-      most_popular_gender(name) do |country_values|
-        country_values.split('').reject { |l| l.strip == '' }.length
-      end
+      most_popular_gender(name).first[:gender]
     elsif COUNTRIES.include?(country)
-      most_popular_gender_in_country(name, country)
+      most_popular_gender(name, country).first[:gender]
     elsif ISO_3166_MAPPING.include?(country)
-      most_popular_gender_in_country(name, ISO_3166_MAPPING[country])
+      most_popular_gender(name, ISO_3166_MAPPING[country]).first[:gender]
+    else
+      raise "No such country: #{country}"
+    end
+  end
+
+  def get_gender_data(name, country = nil)
+    name = downcase(name) unless @case_sensitive
+
+    if !name_exists?(name)
+      {
+        gender:    @unknown_value,
+        country:   nil,
+        frequency: 1.0
+      }
+    elsif country.nil?
+      most_popular_gender(name)
+    elsif COUNTRIES.include?(country)
+      most_popular_gender(name, country)
+    elsif ISO_3166_MAPPING.include?(country)
+      most_popular_gender(name, ISO_3166_MAPPING[country])
     else
       raise "No such country: #{country}"
     end
@@ -91,13 +109,6 @@ class GenderDetector
   end
 
   private
-
-  def most_popular_gender_in_country(name, country)
-    index = COUNTRIES.index(country)
-    most_popular_gender(name) do |country_values|
-      country_values[index].ord
-    end
-  end
 
   def eat_name_line(line)
     return if line.start_with?('#', '=')
@@ -116,23 +127,34 @@ class GenderDetector
     end
   end
 
-  def most_popular_gender(name)
+  def most_popular_gender(name, country = nil)
     return @unknown_value unless @names.key?(name)
 
-    max = 0
-    best = @names[name].keys.first
-    @names[name].each do |gender, country_values|
-      count = yield country_values
-      if count > max
-        max = count
-        best = gender
+    @names[name].flat_map do |gender, country_values|
+      if country
+        value = country_values[COUNTRIES.index(country)]
+        [
+          {
+            gender:    gender,
+            country:   country,
+            frequency: _count_to_percentage(value)
+          }
+        ] if value.strip != ''
+      else
+        COUNTRIES.map.with_index do |country, index|
+          value = country_values[COUNTRIES.index(country)]
+          {
+            gender:    gender,
+            country:   country,
+            frequency: _count_to_percentage(value)
+          } if value.strip != ''
+        end
       end
-    end
-    best
+    end.compact.sort_by { |d| d[:frequency] }.reverse
   end
 
   def set(name, gender, country_values)
-    if name.include? '+'
+    if name.include?('+')
       ['', '-', ' '].each do |replacement|
         set name.gsub('+', replacement), gender, country_values
       end
@@ -148,5 +170,9 @@ class GenderDetector
     else
       name.downcase
     end
+  end
+
+  def _count_to_percentage(count)
+    (count.to_i(16) / 13.0).round(2) # 0xD
   end
 end
